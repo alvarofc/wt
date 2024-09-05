@@ -13,6 +13,7 @@ function App() {
   const [intervalSeconds, setIntervalSeconds] = useState(3); // New state for interval
   const [isCapturing, setIsCapturing] = useState(false); // New state for start/stop
   const [detectionResults, setDetectionResults] = useState<Record<string, number>>({});
+  const [processedImages, setProcessedImages] = useState<string[]>([]);
   const videoRefs = useRef<HTMLVideoElement[]>([]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -69,34 +70,30 @@ function App() {
       });
 
       try {
-        // Create a unique filename for this capture
-        const tempFileName = `temp_images_${Date.now()}.json`;
+        const response = await fetch('http://localhost:8000/detect', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ images: images }),
+        });
 
-        // Write images to a temporary file using Tauri's API
-        const imagesJson = JSON.stringify(images);
-        await writeFile(tempFileName, imagesJson, { dir: BaseDirectory.Temp });
-
-        // Get the full path to the temporary file
-        const tempFilePath = await join(BaseDirectory.Temp, tempFileName);
-
-        // Run detection using the sidecar
-        const command = Command.sidecar('binaries/main', [tempFilePath]);
-        const output = await command.execute();
-        
-        console.log(output);
-        if (output.code === 0) {
-          const results = JSON.parse(output.stdout);
-          const newDetectionResults: Record<string, number> = {};
-          selectedDeviceIds.forEach((deviceId, index) => {
-            newDetectionResults[deviceId] = results[`camera_${index}`] || 0;
-          });
-          setDetectionResults(newDetectionResults);
-        } else {
-          console.error("Error running detection:", output.stderr);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        // Optionally, you can delete the temporary file here if needed
-        // await removeFile(tempFileName, { dir: BaseDirectoryApi.Temp });
+        const data = await response.json();
+        const results = data.results;
+        const processedImages = data.processed_images;
+
+        const newDetectionResults: Record<string, number> = {};
+        selectedDeviceIds.forEach((deviceId, index) => {
+          newDetectionResults[deviceId] = results[`camera_${index}`] || 0;
+        });
+        setDetectionResults(newDetectionResults);
+
+        // Update state with processed images
+        setProcessedImages(processedImages);
 
       } catch (error) {
         console.error("Error running detection:", error);
@@ -184,6 +181,9 @@ function App() {
                 className="video"
               />
               <p>Persons detected: {detectionResults[deviceId] || 0}</p>
+              {processedImages.map((image, index) => (
+                <img key={index} src={`data:image/png;base64,${image}`} alt={`Processed image ${index}`} />
+              ))}
             </div>
           ))}
         </div>
